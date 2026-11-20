@@ -12,11 +12,15 @@ quiet=false
 no_follow_symlinks=false
 no_follow_hidden=false
 
+# spacing and separator settings (with git config defaults)
+spacing=$(git config --bool bulk.spacing 2>/dev/null || echo false)
+separator=$(git config bulk.separator 2>/dev/null || echo "")
+
 #
 # print usage message
 #
 usage() {
-  echo 1>&2 "usage: git bulk [--no-follow-symlinks] [--no-follow-hidden] [-q|--quiet] [-g] ([-a]|[-w <ws-name>]) <git command>"
+  echo 1>&2 "usage: git bulk [--no-follow-symlinks] [--no-follow-hidden] [-s|--spacing] [-d|--divider] [--separator[=<style>]] [-q|--quiet] [-g] ([-a]|[-w <ws-name>]) <git command>"
   echo 1>&2 "       git bulk --addworkspace <ws-name> <ws-root-directory> (--from <URL or file>)"
   echo 1>&2 "       git bulk --removeworkspace <ws-name>"
   echo 1>&2 "       git bulk --addcurrent <ws-name>"
@@ -70,9 +74,41 @@ purge() { git config --global --remove-section bulkworkspaces; }
 # list all current workspace locations defined
 listall() { git config --global --get-regexp bulkworkspaces; }
 
+# print divider rule or custom separator
+print_separator () {
+  if [ -z "$separator" ] || [ "$separator" = "false" ] || [ "$separator" = "none" ]; then
+    return
+  fi
+
+  local width
+  width=$(tput cols 2>/dev/null)
+  [[ "$width" =~ ^[0-9]+$ ]] && [ "$width" -gt 0 ] || width="${COLUMNS:-80}"
+  [[ "$width" =~ ^[0-9]+$ ]] && [ "$width" -gt 0 ] || width=80
+
+  case "$separator" in
+    true|line|dash)
+      printf '%*s\n' "$width" '' | tr ' ' '-' >&2
+      ;;
+    double)
+      printf '%*s\n' "$width" '' | tr ' ' '=' >&2
+      ;;
+    star)
+      printf '%*s\n' "$width" '' | tr ' ' '*' >&2
+      ;;
+    *)
+      if [ "${#separator}" -eq 1 ]; then
+        printf '%*s\n' "$width" '' | tr ' ' "$separator" >&2
+      else
+        echo 1>&2 "$separator"
+      fi
+      ;;
+  esac
+}
+
 # guarded execution of a git command in one specific repository
 guardedExecution () {
   if [ "${quiet?}" != "true" ] || $guardedmode; then
+    print_separator
     echo 1>&2 "${bldred}->${reset} executing ${inverse}git $gitcommand${reset} in repository ${leadingpath%/*}/${bldred}${curdir##*/}${reset}"
   fi
 
@@ -84,6 +120,12 @@ guardedExecution () {
     fi
   else
     git "$@"
+  fi
+
+  if [ "$spacing" = true ]; then
+    if [ "${quiet?}" != "true" ] || $guardedmode; then
+      echo 1>&2
+    fi
   fi
 }
 
@@ -191,6 +233,24 @@ if [[ $paramcount -le 0 ]]; then usage; fi
 while [ "${#}" -ge 1 ] ; do
   case "$1" in
 		--quiet|-q) quiet='true' ;;
+    -s|--spacing)
+      spacing=true ;;
+    --no-spacing)
+      spacing=false ;;
+    -d|--divider)
+      separator="line" ;;
+    --separator=*)
+      separator="${1#*=}" ;;
+    --separator)
+      if [[ -n "$2" && "$2" =~ ^(line|double|dash|star|[=-~_#*]+)$ ]]; then
+        separator="$2"
+        shift
+      else
+        separator="line"
+      fi
+      ;;
+    --no-separator)
+      separator="" ;;
     --listall|--purge)
       butilcommand="${1:2}" && break ;;
     --removeworkspace|--addcurrent|--addworkspace)
